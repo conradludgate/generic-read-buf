@@ -1,34 +1,12 @@
-use crate::{ReadBuf, Read};
+use cl_generic_read_buf::ReadSlice;
 
-use std::{mem::MaybeUninit, io::{Cursor, self}};
+use std::mem::MaybeUninit;
 
-#[test]
-fn read_buf_exact() {
-    let mut buf = [0; 4];
-    let mut buf = ReadBuf::from(&mut buf[..]);
-
-    let mut c = Cursor::new(&b""[..]);
-    assert_eq!(c.read_buf_exact(buf.borrow()).unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
-
-    let mut c = Cursor::new(&b"123456789"[..]);
-    c.read_buf_exact(buf.borrow()).unwrap();
-    assert_eq!(buf.filled(), b"1234");
-
-    buf.clear();
-
-    c.read_buf_exact(buf.borrow()).unwrap();
-    assert_eq!(buf.filled(), b"5678");
-
-    buf.clear();
-
-    assert_eq!(c.read_buf_exact(buf.borrow()).unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
-}
-
-/// Test that ReadBuf has the correct numbers when created with new
+/// Test that ReadSlice has the correct numbers when created with new
 #[test]
 fn new() {
     let mut buf = [0; 16];
-    let rbuf = ReadBuf::from(&mut buf[..]);
+    let rbuf = ReadSlice::from(&mut buf[..]);
 
     assert_eq!(rbuf.filled_len(), 0);
     assert_eq!(rbuf.initialized_len(), 16);
@@ -36,11 +14,11 @@ fn new() {
     assert_eq!(rbuf.remaining(), 16);
 }
 
-/// Test that ReadBuf has the correct numbers when created with uninit
+/// Test that ReadSlice has the correct numbers when created with uninit
 #[test]
 fn uninit() {
     let mut buf = [MaybeUninit::uninit(); 16];
-    let rbuf = ReadBuf::from(&mut buf[..]);
+    let rbuf = ReadSlice::from(&mut buf[..]);
 
     assert_eq!(rbuf.filled_len(), 0);
     assert_eq!(rbuf.initialized_len(), 0);
@@ -51,7 +29,7 @@ fn uninit() {
 #[test]
 fn initialize_unfilled() {
     let mut buf = [MaybeUninit::uninit(); 16];
-    let mut rbuf = ReadBuf::from(&mut buf[..]);
+    let mut rbuf = ReadSlice::from(&mut buf[..]);
 
     rbuf.initialize_unfilled();
 
@@ -61,7 +39,7 @@ fn initialize_unfilled() {
 #[test]
 fn initialize_unfilled_to() {
     let mut buf = [MaybeUninit::uninit(); 16];
-    let mut rbuf = ReadBuf::from(&mut buf[..]);
+    let mut rbuf = ReadSlice::from(&mut buf[..]);
 
     rbuf.initialize_unfilled_to(8);
 
@@ -85,7 +63,7 @@ fn initialize_unfilled_to() {
 #[test]
 fn add_filled() {
     let mut buf = [0; 16];
-    let mut rbuf = ReadBuf::from(&mut buf[..]);
+    let mut rbuf = ReadSlice::from(&mut buf[..]);
 
     rbuf.add_filled(1);
 
@@ -97,7 +75,7 @@ fn add_filled() {
 #[should_panic]
 fn add_filled_panic() {
     let mut buf = [MaybeUninit::uninit(); 16];
-    let mut rbuf = ReadBuf::from(&mut buf[..]);
+    let mut rbuf = ReadSlice::from(&mut buf[..]);
 
     rbuf.add_filled(1);
 }
@@ -105,7 +83,7 @@ fn add_filled_panic() {
 #[test]
 fn set_filled() {
     let mut buf = [0; 16];
-    let mut rbuf = ReadBuf::from(&mut buf[..]);
+    let mut rbuf = ReadSlice::from(&mut buf[..]);
 
     rbuf.set_filled(16);
 
@@ -122,7 +100,7 @@ fn set_filled() {
 #[should_panic]
 fn set_filled_panic() {
     let mut buf = [MaybeUninit::uninit(); 16];
-    let mut rbuf = ReadBuf::from(&mut buf[..]);
+    let mut rbuf = ReadSlice::from(&mut buf[..]);
 
     rbuf.set_filled(16);
 }
@@ -130,7 +108,7 @@ fn set_filled_panic() {
 #[test]
 fn clear() {
     let mut buf = [255; 16];
-    let mut rbuf = ReadBuf::from(&mut buf[..]);
+    let mut rbuf = ReadSlice::from(&mut buf[..]);
 
     rbuf.set_filled(16);
 
@@ -148,7 +126,7 @@ fn clear() {
 #[test]
 fn assume_init() {
     let mut buf = [MaybeUninit::uninit(); 16];
-    let mut rbuf = ReadBuf::from(&mut buf[..]);
+    let mut rbuf = ReadSlice::from(&mut buf[..]);
 
     unsafe {
         rbuf.assume_init(8);
@@ -174,7 +152,7 @@ fn assume_init() {
 #[test]
 fn append() {
     let mut buf = [MaybeUninit::new(255); 16];
-    let mut rbuf = ReadBuf::from(&mut buf[..]);
+    let mut rbuf = ReadSlice::from(&mut buf[..]);
 
     rbuf.append(&[0; 8]);
 
@@ -194,7 +172,7 @@ fn append() {
 #[test]
 fn filled_mut() {
     let mut buf = [0; 16];
-    let mut rbuf = ReadBuf::from(&mut buf[..]);
+    let mut rbuf = ReadSlice::from(&mut buf[..]);
 
     rbuf.add_filled(8);
 

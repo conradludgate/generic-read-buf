@@ -1,8 +1,7 @@
+//! ReadBuf types and methods. See https://github.com/rust-lang/rust/issues/78485
+
 use cl_generic_vec::{raw::Storage, ArrayVec, HeapVec, SimpleVec, SliceVec};
 use std::{cmp, fmt, io, mem::MaybeUninit, ops::Deref};
-
-#[cfg(test)]
-mod tests;
 
 /// A [`Storage`] of [`u8`]s
 pub trait Bytes: Storage<Item = u8> {}
@@ -88,14 +87,27 @@ impl<S: Bytes> fmt::Debug for ReadBuf<S> {
 pub type ReadSlice<'a> = ReadBuf<&'a mut [MaybeUninit<u8>]>;
 /// A [`ReadBuf`] that owns it's buffer using a [`Vec<u8>`]
 pub type ReadVec = ReadBuf<Box<[MaybeUninit<u8>]>>;
+/// A [`ReadBuf`] that owns it's buffer using a [`[MaybeUninit<u8>; N]`](array)
+pub type ReadArray<const N: usize> = ReadBuf<[MaybeUninit<u8>; N]>;
 
-impl<const N: usize> ReadBuf<[MaybeUninit<u8>; N]> {
+impl<const N: usize> ReadArray<N> {
     /// Create a new uninitialised [`ReadBuf`] backed by an array
     /// Will begin with 0 filled bytes.
     pub fn new_uninit_array() -> Self {
         Self {
             filled: 0,
             buf: ArrayVec::new(),
+        }
+    }
+}
+
+/// Create a [`ReadBuf`] from a fully initialised array of bytes.
+/// Will begin with 0 filled bytes.
+impl<const N: usize> From<[u8; N]> for ReadArray<N> {
+    fn from(buf: [u8; N]) -> Self {
+        ReadBuf {
+            filled: 0,
+            buf: ArrayVec::from_array(buf),
         }
     }
 }
