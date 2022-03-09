@@ -1,0 +1,13 @@
+[package]
+name = 'cl-generic-read-buf'
+version = '0.1.0'
+authors = ['Conrad Ludgate <conradludgate@gmail.com>']
+edition = '2021'
+license = 'MIT/Apache-2.0'
+description = 'a ReadBuf implementation based on cl-generic-vec'
+repository = 'https://github.com/conradludgate/generic-read-buf'
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cl-generic-vec = "0.4.0"
