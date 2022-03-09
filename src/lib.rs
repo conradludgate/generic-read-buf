@@ -1,10 +1,14 @@
-use std::{cmp, io, mem::MaybeUninit, ops::Deref};
+use cl_generic_vec::{raw::Storage, ArrayVec, HeapVec, SimpleVec, SliceVec};
+use std::{cmp, fmt, io, mem::MaybeUninit, ops::Deref};
 
-use cl_generic_vec::{raw::Storage, SimpleVec, SliceVec, ArrayVec};
+#[cfg(test)]
+mod tests;
 
+/// A [`Storage`] of [`u8`]s
 pub trait Bytes: Storage<Item = u8> {}
 impl<S: Storage<Item = u8>> Bytes for S {}
 
+/// A wrapper over [`io::Read`] to provide the custom read_buf* methods on stable
 pub trait Read: io::Read {
     /// Pull some bytes from this source into the specified buffer.
     ///
@@ -12,10 +16,7 @@ pub trait Read: io::Read {
     /// with uninitialized buffers. The new data will be appended to any existing contents of `buf`.
     ///
     /// The default implementation delegates to `read`.
-    fn read_buf(
-        &mut self,
-        buf: ReadBufRef<'_, impl Bytes>,
-    ) -> io::Result<()> {
+    fn read_buf(&mut self, buf: ReadBufRef<'_, impl Bytes>) -> io::Result<()> {
         default_read_buf(|b| self.read(b), buf)
     }
 
@@ -23,10 +24,7 @@ pub trait Read: io::Read {
     ///
     /// This is equivalent to the [`read_exact`](io::Read::read_exact) method, except that it is passed a [`ReadBufRef`] rather than `[u8]` to
     /// allow use with uninitialized buffers.
-    fn read_buf_exact(
-        &mut self,
-        mut buf: ReadBufRef<'_, impl Bytes>,
-    ) -> io::Result<()> {
+    fn read_buf_exact(&mut self, mut buf: ReadBufRef<'_, impl Bytes>) -> io::Result<()> {
         while buf.remaining() > 0 {
             let prev_filled = buf.filled().len();
             match Read::read_buf(self, buf.reborrow()) {
@@ -49,10 +47,7 @@ pub trait Read: io::Read {
 
 impl<R: io::Read> Read for R {}
 
-pub(crate) fn default_read_buf<F>(
-    read: F,
-    mut buf: ReadBufRef<'_, impl Bytes>,
-) -> io::Result<()>
+pub(crate) fn default_read_buf<F>(read: F, mut buf: ReadBufRef<'_, impl Bytes>) -> io::Result<()>
 where
     F: FnOnce(&mut [u8]) -> io::Result<usize>,
 {
@@ -61,24 +56,52 @@ where
     Ok(())
 }
 
-#[derive(Debug)]
+/// A wrapper around a byte buffer that is incrementally filled and initialized.
+///
+/// This type is a sort of "double cursor". It tracks three regions in the buffer: a region at the beginning of the
+/// buffer that has been logically filled with data, a region that has been initialized at some point but not yet
+/// logically filled, and a region at the end that is fully uninitialized. The filled region is guaranteed to be a
+/// subset of the initialized region.
+///
+/// In summary, the contents of the buffer can be visualized as:
+/// ```not_rust
+/// [             capacity              ]
+/// [ filled |         unfilled         ]
+/// [    initialized    | uninitialized ]
+/// ```
 pub struct ReadBuf<S: Bytes> {
     filled: usize,
     buf: SimpleVec<S>,
 }
 
+impl<S: Bytes> fmt::Debug for ReadBuf<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReadBuf")
+            .field("init", &self.buf.len())
+            .field("filled", &self.filled)
+            .field("capacity", &self.buf.capacity())
+            .finish()
+    }
+}
+
+/// A [`ReadBuf`] that takes it's buffer from an existing slice
 pub type ReadSlice<'a> = ReadBuf<&'a mut [MaybeUninit<u8>]>;
+/// A [`ReadBuf`] that owns it's buffer using a [`Vec<u8>`]
 pub type ReadVec = ReadBuf<Box<[MaybeUninit<u8>]>>;
 
 impl<const N: usize> ReadBuf<[MaybeUninit<u8>; N]> {
+    /// Create a new uninitialised [`ReadBuf`] backed by an array
+    /// Will begin with 0 filled bytes.
     pub fn new_uninit_array() -> Self {
         Self {
             filled: 0,
-            buf: ArrayVec::new()
+            buf: ArrayVec::new(),
         }
     }
 }
 
+/// Create a [`ReadBuf`] from a partially initialised vec of bytes.
+/// Will begin with 0 filled bytes.
 impl From<Vec<u8>> for ReadVec {
     fn from(buf: Vec<u8>) -> Self {
         ReadBuf {
@@ -88,6 +111,19 @@ impl From<Vec<u8>> for ReadVec {
     }
 }
 
+/// Create a [`ReadBuf`] from an uninitialised boxed-slice of bytes.
+/// Will begin with 0 filled bytes.
+impl From<Box<[MaybeUninit<u8>]>> for ReadVec {
+    fn from(buf: Box<[MaybeUninit<u8>]>) -> Self {
+        ReadBuf {
+            filled: 0,
+            buf: HeapVec::with_storage(buf),
+        }
+    }
+}
+
+/// Create a [`ReadBuf`] from an initialised slice of bytes.
+/// Will begin with 0 filled bytes.
 impl<'a> From<&'a mut [u8]> for ReadSlice<'a> {
     fn from(buf: &'a mut [u8]) -> Self {
         ReadBuf {
@@ -97,6 +133,8 @@ impl<'a> From<&'a mut [u8]> for ReadSlice<'a> {
     }
 }
 
+/// Create a [`ReadBuf`] from an uninitialised slice of bytes.
+/// Will begin with 0 filled bytes.
 impl<'a> From<&'a mut [MaybeUninit<u8>]> for ReadSlice<'a> {
     fn from(buf: &'a mut [MaybeUninit<u8>]) -> Self {
         ReadBuf {
@@ -107,6 +145,12 @@ impl<'a> From<&'a mut [MaybeUninit<u8>]> for ReadSlice<'a> {
 }
 
 impl<S: Bytes> ReadBuf<S> {
+    /// Extract the bytes from the [`ReadBuf`]
+    pub fn into_inner(self) -> SimpleVec<S> {
+        assert_eq!(self.filled, self.buf.len());
+        self.buf
+    }
+
     /// Creates a new [`ReadBufRef`] referencing this `ReadBuf`.
     #[inline]
     pub fn borrow(&mut self) -> ReadBufRef<'_, S> {
@@ -307,14 +351,11 @@ where
     this.copy_from_slice(uninit_src);
 }
 
-/// A wrapper around [`&mut GenericReadBuf`](GenericReadBuf) which prevents the buffer that the `GenericReadBuf` points to from being replaced.
+/// A wrapper around [`&mut ReadBuf`](ReadBuf) which prevents the buffer that the [`ReadBuf`] points to from being replaced.
 #[derive(Debug)]
 pub struct ReadBufRef<'a, S: Bytes> {
     read_buf: &'a mut ReadBuf<S>,
 }
-
-/// A wrapper around [`&mut ReadBuf`](ReadBuf) which prevents the buffer that the `ReadBuf` points to from being replaced.
-pub type ReadSliceRef<'a, 'b> = ReadBufRef<'a, &'b mut [MaybeUninit<u8>]>;
 
 impl<'a, S: Bytes> ReadBufRef<'a, S> {
     /// Creates a new `ReadBufRef` referencing the same `ReadBuf` as this one.
