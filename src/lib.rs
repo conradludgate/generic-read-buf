@@ -2,27 +2,30 @@ use std::{cmp, io, mem::MaybeUninit, ops::Deref};
 
 use cl_generic_vec::{raw::Storage, SimpleVec, SliceVec, ArrayVec};
 
+pub trait Bytes: Storage<Item = u8> {}
+impl<S: Storage<Item = u8>> Bytes for S {}
+
 pub trait Read: io::Read {
     /// Pull some bytes from this source into the specified buffer.
     ///
-    /// This is equivalent to the [`read`](Read::read) method, except that it is passed a [`ReadBuf`] rather than `[u8]` to allow use
+    /// This is equivalent to the [`read`](io::Read::read) method, except that it is passed a [`ReadBufRef`] rather than `[u8]` to allow use
     /// with uninitialized buffers. The new data will be appended to any existing contents of `buf`.
     ///
     /// The default implementation delegates to `read`.
     fn read_buf(
         &mut self,
-        buf: GenericReadBufRef<'_, impl Storage<Item = u8> + ?Sized>,
+        buf: ReadBufRef<'_, impl Bytes>,
     ) -> io::Result<()> {
         default_read_buf(|b| self.read(b), buf)
     }
 
     /// Read the exact number of bytes required to fill `buf`.
     ///
-    /// This is equivalent to the [`read_exact`](Read::read_exact) method, except that it is passed a [`ReadBuf`] rather than `[u8]` to
+    /// This is equivalent to the [`read_exact`](io::Read::read_exact) method, except that it is passed a [`ReadBufRef`] rather than `[u8]` to
     /// allow use with uninitialized buffers.
     fn read_buf_exact(
         &mut self,
-        mut buf: GenericReadBufRef<'_, impl Storage<Item = u8> + ?Sized>,
+        mut buf: ReadBufRef<'_, impl Bytes>,
     ) -> io::Result<()> {
         while buf.remaining() > 0 {
             let prev_filled = buf.filled().len();
@@ -48,7 +51,7 @@ impl<R: io::Read> Read for R {}
 
 pub(crate) fn default_read_buf<F>(
     read: F,
-    mut buf: GenericReadBufRef<'_, impl Storage<Item = u8> + ?Sized>,
+    mut buf: ReadBufRef<'_, impl Bytes>,
 ) -> io::Result<()>
 where
     F: FnOnce(&mut [u8]) -> io::Result<usize>,
@@ -59,15 +62,15 @@ where
 }
 
 #[derive(Debug)]
-pub struct GenericReadBuf<S: Storage<Item = u8> + ?Sized> {
+pub struct ReadBuf<S: Bytes> {
     filled: usize,
     buf: SimpleVec<S>,
 }
 
-pub type ReadBuf<'a> = GenericReadBuf<&'a mut [MaybeUninit<u8>]>;
-pub type ReadBufOwned = GenericReadBuf<Box<[MaybeUninit<u8>]>>;
+pub type ReadSlice<'a> = ReadBuf<&'a mut [MaybeUninit<u8>]>;
+pub type ReadVec = ReadBuf<Box<[MaybeUninit<u8>]>>;
 
-impl<const N: usize> GenericReadBuf<[MaybeUninit<u8>; N]> {
+impl<const N: usize> ReadBuf<[MaybeUninit<u8>; N]> {
     pub fn new_uninit_array() -> Self {
         Self {
             filled: 0,
@@ -76,38 +79,38 @@ impl<const N: usize> GenericReadBuf<[MaybeUninit<u8>; N]> {
     }
 }
 
-impl From<Vec<u8>> for ReadBufOwned {
+impl From<Vec<u8>> for ReadVec {
     fn from(buf: Vec<u8>) -> Self {
-        GenericReadBuf {
+        ReadBuf {
             filled: 0,
             buf: buf.into(),
         }
     }
 }
 
-impl<'a> From<&'a mut [u8]> for ReadBuf<'a> {
+impl<'a> From<&'a mut [u8]> for ReadSlice<'a> {
     fn from(buf: &'a mut [u8]) -> Self {
-        GenericReadBuf {
+        ReadBuf {
             filled: 0,
             buf: SliceVec::full(buf),
         }
     }
 }
 
-impl<'a> From<&'a mut [MaybeUninit<u8>]> for ReadBuf<'a> {
+impl<'a> From<&'a mut [MaybeUninit<u8>]> for ReadSlice<'a> {
     fn from(buf: &'a mut [MaybeUninit<u8>]) -> Self {
-        GenericReadBuf {
+        ReadBuf {
             filled: 0,
             buf: unsafe { SliceVec::new(buf) },
         }
     }
 }
 
-impl<S: Storage<Item = u8> + ?Sized> GenericReadBuf<S> {
+impl<S: Bytes> ReadBuf<S> {
     /// Creates a new [`ReadBufRef`] referencing this `ReadBuf`.
     #[inline]
-    pub fn borrow(&mut self) -> GenericReadBufRef<'_, S> {
-        GenericReadBufRef { read_buf: self }
+    pub fn borrow(&mut self) -> ReadBufRef<'_, S> {
+        ReadBufRef { read_buf: self }
     }
 
     /// Returns the total capacity of the buffer.
@@ -306,17 +309,17 @@ where
 
 /// A wrapper around [`&mut GenericReadBuf`](GenericReadBuf) which prevents the buffer that the `GenericReadBuf` points to from being replaced.
 #[derive(Debug)]
-pub struct GenericReadBufRef<'a, S: Storage<Item = u8> + ?Sized> {
-    read_buf: &'a mut GenericReadBuf<S>,
+pub struct ReadBufRef<'a, S: Bytes> {
+    read_buf: &'a mut ReadBuf<S>,
 }
 
 /// A wrapper around [`&mut ReadBuf`](ReadBuf) which prevents the buffer that the `ReadBuf` points to from being replaced.
-pub type ReadBufRef<'a, 'b> = GenericReadBufRef<'a, &'b [MaybeUninit<u8>]>;
+pub type ReadSliceRef<'a, 'b> = ReadBufRef<'a, &'b mut [MaybeUninit<u8>]>;
 
-impl<'a, S: Storage<Item = u8> + ?Sized> GenericReadBufRef<'a, S> {
+impl<'a, S: Bytes> ReadBufRef<'a, S> {
     /// Creates a new `ReadBufRef` referencing the same `ReadBuf` as this one.
-    pub fn reborrow(&mut self) -> GenericReadBufRef<'_, S> {
-        GenericReadBufRef {
+    pub fn reborrow(&mut self) -> ReadBufRef<'_, S> {
+        ReadBufRef {
             read_buf: self.read_buf,
         }
     }
@@ -433,10 +436,10 @@ impl<'a, S: Storage<Item = u8> + ?Sized> GenericReadBufRef<'a, S> {
     }
 }
 
-impl<'a, S: Storage<Item = u8> + ?Sized> Deref for GenericReadBufRef<'a, S> {
-    type Target = GenericReadBuf<S>;
+impl<'a, S: Bytes> Deref for ReadBufRef<'a, S> {
+    type Target = ReadBuf<S>;
 
-    fn deref(&self) -> &GenericReadBuf<S> {
+    fn deref(&self) -> &ReadBuf<S> {
         &*self.read_buf
     }
 }

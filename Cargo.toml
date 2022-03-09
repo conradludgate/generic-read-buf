@@ -1,6 +1,6 @@
 [package]
 name = 'cl-generic-read-buf'
-version = '0.1.0'
+version = '0.1.1'
 authors = ['Conrad Ludgate <conradludgate@gmail.com>']
 edition = '2021'
 license = 'MIT/Apache-2.0'
